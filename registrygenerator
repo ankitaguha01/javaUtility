@@ -1,0 +1,1001 @@
+import java.io.BufferedReader;
+import java.io.Console;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.log4j.BasicConfigurator;
+import org.apache.log4j.Logger;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.poi.hssf.record.cf.PatternFormatting;
+import org.apache.poi.hssf.usermodel.HSSFConditionalFormattingRule;
+import org.apache.poi.hssf.usermodel.HSSFFontFormatting;
+import org.apache.poi.hssf.usermodel.HSSFPatternFormatting;
+import org.apache.poi.hssf.usermodel.HSSFRow;
+import org.apache.poi.hssf.usermodel.HSSFSheet;
+import org.apache.poi.hssf.usermodel.HSSFSheetConditionalFormatting;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.util.CellRangeAddress;
+
+
+
+
+
+import com.sun.jersey.core.impl.provider.entity.XMLJAXBElementProvider.App;
+
+/*
+ 	
+ 	
+ 	
+ 	Description : Utility reads data from source systems Oracle,Mysql and sqlserver and writes to spreadsheet
+ 	
+ 	Methods		: checksource - Check the source system,if valid as for further inputs
+  			 	  oracleconnection - Checks Oracle connectivity and credentials
+  			 	  mysqlconnection - Checks MySql connectivity and credentials
+  			 	  hiveconnection - Checks Hive connectivity and credentials
+			 	  sqlserverconnection - Checks sqlserver connectivity and credentials
+			 	  database - creates query for further processing
+			 	  stores - creates spreadsheet, reads data from database and writes to spreadsheet
+			 	  mapdatatocellhive - Hive data processing
+			 	  mapdatatocellnonhive - RDBMS data processing.
+	
+	Flow 		: checksource -> oracleconnection 
+					  		  -> mysqlconnection
+					  		  -> sqlserverconnection
+					  		  -> database -> stores -> mapdatatocellhive
+					  		  						-> mapdatatocellnonhive
+					  		  	
+    */
+
+public class RegistryGeneratorOriginal {
+
+	static String source = "";
+	static String dboption = "";
+	static String jdbc = "";
+	static String db = "";
+	static String username = "";
+	static String passwd = "";
+	static String owner = "";
+	static String def = "";
+	static String cust = "";
+	static String SSRID = "";
+	static String app = "";
+	static String folder = "";
+	static String tables = "";
+	static String selectedtables = "";
+	static Connection connection = null;
+	static Console cnsl = null;
+	static boolean ind = false;
+	private static final Logger LOGGER = Logger.getLogger(App.class.getName());
+	private static final String CE1 = "Connection error with ";
+	private static final String MYSQL ="MYSQL";
+	private static final String ORACLE ="ORACLE";
+	private static final String SQLSERVER ="SQLSERVER";
+	private static final String HIVE ="HIVE";
+	private static final String SQLSERVERLDAP ="SQLSERVERLDAP";
+	private static final String Error ="Error,please try again";
+	private static final String Instructions ="Instructions:";
+	@SuppressWarnings("deprecation")
+
+
+	public static void main(String[] args) throws Exception {
+	InputStreamReader r=new InputStreamReader(System.in);    
+    BufferedReader br=new BufferedReader(r);    
+    BasicConfigurator.configure();
+		cnsl = System.console();
+		// prompts user for Details
+
+		LOGGER.info("\nEnter the Source Name(like ORACLE,SQLSERVER,MYSQL,HIVE,SQLSERVERLDAP)  :");
+		source = br.readLine().toUpperCase().trim();
+
+		checksource();
+
+	}
+       
+       
+    
+	public static void checksource() {
+
+		if (source.contains(ORACLE) || source.contains(SQLSERVER) || source.contains(MYSQL) || source.contains(HIVE) || source.contains(SQLSERVERLDAP)) {
+
+			LOGGER.info("\n Enter the JDBC Path(like hostname:portnumber:sid(for oracle source))/servicename(for oracle cource): , Incase of LDAP Connection use string as shown in example here : hostname:portnumber;databaseName=Quest_Repl ");
+			InputStreamReader r=new InputStreamReader(System.in);    
+		    BufferedReader br=new BufferedReader(r);  
+			try {
+				jdbc = br.readLine().trim();
+			} catch (IOException e) {
+				
+				LOGGER.error("\n Error in jdbc connection string Please check", e);
+			}
+			
+			if (source.contains("HIVE")) {
+				LOGGER.info("\n Enter 1 to provide single Database Name or 2 for list of Database Name or option 3 to provide list of different Database and Table names:");
+				try {
+					dboption = br.readLine().trim();
+				} catch (IOException e) {
+					LOGGER.error("\n Error with hive connection,Please check", e);
+				}
+			
+			if (dboption.contains("1")) {
+				LOGGER.info("\n Enter the Database Name  (like lz_asl_asl_prod_dev) :");
+					try {
+						db = br.readLine().trim();
+					} catch (IOException e) {
+						LOGGER.error("\n Error in the Database name, Please enter the correct Database name ", e);
+					}
+				} else if (dboption.contains("2")) {
+					LOGGER.info("\n Enter the list of comma seperated Database Name( like lz_boem_dev,lz_crm_siebel_dev,lz_fde_facility_dev) :");
+					try {
+						db = br.readLine().trim();
+					} catch (IOException e) {
+						LOGGER.error("\n Error in mentionining the db names, Please give comma separated dbnames", e);
+					}
+				} else if (dboption.contains("3")) {
+					LOGGER.info("\n Enter the list of comma seperated Database Table Name/s( like DB1.TB1,DB2.TB2) :");
+					try {
+						selectedtables = br.readLine().trim();
+					} catch (IOException e) {
+						LOGGER.error("\n Error in typing dbname.tablename ,please try again", e);
+					}
+				}
+
+			} else {
+				LOGGER.info("\n Enter the Database Name (like PGETPAID) :");
+				try {
+					db = br.readLine().trim();
+				} catch (IOException e) {
+					LOGGER.error("\n Error,Please enter the correct db name", e);
+				}
+			}
+			LOGGER.info("\n Enter the Username :");
+			try {
+				username = br.readLine().trim();
+			} catch (IOException e) {
+				LOGGER.error("\n Error,please give correct username", e);
+			}
+			
+						
+			LOGGER.info("\n Enter the Password :");
+			char[] passString = cnsl.readPassword();
+			passwd = "Meta#Dev02";
+			
+			if (source.contains(ORACLE)) {
+				connection = oracleconnection();
+			}else if (source.contains(MYSQL)) {
+				connection = mysqlconnection();
+			} else if (source.contains(HIVE)) {
+				connection = hiveconnection();
+			}
+			else if (source.contains(SQLSERVERLDAP)) {
+				connection = sqlserverldap();
+				LOGGER.info("You made it, SQLSERVERLDAP");
+			}
+		else if (source.contains(SQLSERVER)) {
+			connection = sqlserverconnection();
+		}
+			if (connection != null) {
+				LOGGER.info("\n Connection successful with " + jdbc + db);
+				LOGGER.info("\n You made it, take control of your database now!");
+				if (source.contains("HIVE")) {
+					LOGGER.info("\n Enter the SSRID (like EAR-AA-3409) :");
+					try {
+						SSRID = br.readLine().trim();
+					} catch (IOException e) {
+						LOGGER.error(Error, e);
+					}
+					LOGGER.info("\n Enter the Application Name (like GETPAID) :");
+					try {
+						app = br.readLine().trim();
+					} catch (IOException e) {
+						LOGGER.error(Error, e);
+					}
+					if (dboption.contains("1")) {
+						LOGGER.info("\n Enter 1 to get result of all tables OR Enter 2 to get result of selected tables :");
+						try {
+							tables = br.readLine().trim();
+						} catch (IOException e) {
+							LOGGER.error(Error, e);
+						}
+
+						if (tables.contains("2")) {
+							LOGGER.info("\n Enter table names (like table1,table2) :");
+							try {
+								selectedtables = br.readLine().trim();
+							} catch (IOException e) {
+								LOGGER.error("\n Error in entering the tablename,please ensure the proper delimited tablenames", e);
+							}
+						}
+					}
+				} else {
+					LOGGER.info("\n Enter 1 to run default query OR Enter 2 to for custom query :");
+					try {
+						def = br.readLine().trim();
+					} catch (IOException e) {
+						LOGGER.error(Error, e);
+					}
+					if (def.contains("1")) {
+						LOGGER.info("\n Enter the SSRID (like EAR-AA-3409) :");
+						try {
+							SSRID = "EAR-AA-3409";
+						} catch (Exception e) {
+							LOGGER.error(Error, e);
+						}
+						LOGGER.info("\n Enter the Application Name (like GETPAID) :");
+						try {
+							app = "DEV_META_DATA";
+						} catch (Exception e) {
+
+							LOGGER.error(Error, e);
+						}
+
+						LOGGER.info("\n Enter the Owner/schema name (like 'DBSNMP','dbo') :");
+						try {
+							owner = "DEV_META_DATA";
+						} catch (Exception e) {
+							LOGGER.error(Error, e);
+						}
+						LOGGER.info("\n Enter 1 to get result of all tables OR Enter 2 to get result of selected tables :");
+						try {
+							tables = br.readLine().trim();
+						} catch (IOException e) {
+							LOGGER.error(Error, e);
+						}
+
+						if (tables.contains("2")) {
+							LOGGER.info("\n Enter table name/s (like table1,table2) :");
+							try {
+								selectedtables = br.readLine().trim();
+							} catch (IOException e) {
+								LOGGER.error(Error, e);
+							}
+						}
+					} else if (def.contains("2")) {
+
+						LOGGER.info(
+								"Enter custom query which should contain ApplicationName,SSRID,Table_name,column_name,data_type,column_length,column_scale,security_classification,unit_of_measure,contains_multiple_values,Is_Nullable,is_primary_key,owner fields in given order as the query output :");
+						try {
+							cust = br.readLine().trim();
+						} catch (IOException e) {
+							LOGGER.error(Error, e);
+						}
+					}
+				}
+
+				LOGGER.info("\n Enter the windows path where XLS needs to be created (like C:\\Users) :");
+				try {
+					folder = br.readLine().trim();
+				} catch (IOException e) {
+					LOGGER.error(Error, e);
+				}
+				database();
+			} else {
+				LOGGER.error(" \n Failed to make connection !");
+				LOGGER.info("\n ERROR : Failed to make connection, check credentials or firewall authentication");
+				LOGGER.info("\n Enter Credentials again");
+				checksource();
+			}
+		} else
+
+		{
+			LOGGER.error("\n Invalid source " + source + ". Please Enter valid source name");
+			LOGGER.info("\n ERROR : Enter valid source name");
+			LOGGER.info("\n Enter the Source Name again  :");
+			InputStreamReader r=new InputStreamReader(System.in);    
+		    BufferedReader br=new BufferedReader(r); 
+			try {
+				source = br.readLine().toUpperCase().trim();
+			} catch (IOException e) {
+				LOGGER.error(Error, e);
+			}
+			checksource();
+		}
+
+	}
+
+	public static Connection oracleconnection() {
+
+		LOGGER.info("\n -------- Oracle JDBC Connection Testing ------");
+
+
+		LOGGER.info("\n Oracle JDBC Driver Registered!");
+
+		try {
+			connection = DriverManager.getConnection("jdbc:oracle:thin:@" + jdbc , username, passwd);
+		} catch (SQLException e) {
+			LOGGER.error(CE1 + jdbc + db, e);
+		}
+
+		return connection;
+
+	}
+
+	public static Connection mysqlconnection() {
+
+		LOGGER.info("-------- MySQL JDBC Connection Testing ------");
+		try {
+			Class.forName("com.mysql.jdbc.Driver");
+		} catch (ClassNotFoundException e) {
+			LOGGER.error("Unable to connect to driver ", e);
+
+		}
+
+		LOGGER.info("\n MySQL JDBC Driver Registered!");
+
+		try {
+			connection = DriverManager.getConnection("jdbc:mysql://" + jdbc + "/" + db, username, passwd);
+
+		} catch (SQLException e) {
+			LOGGER.error(CE1 + jdbc + db, e);
+		}
+
+		return connection;
+
+	}
+
+	public static Connection sqlserverconnection() {
+
+		LOGGER.info("-------- SQL server JDBC Connection Testing ------");
+		
+		try {
+			Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
+		} catch (ClassNotFoundException e) {
+			LOGGER.error("Unable to connect to driver ", e);
+
+		}
+
+
+	try {
+	connection = DriverManager.getConnection("jdbc:sqlserver://" + jdbc + ";user=" + username + ";password=" + passwd +  ";database=" + db );
+		
+
+		} catch (SQLException e) {
+
+			LOGGER.error(CE1 + jdbc + db, e);
+
+		}
+
+		return connection;
+
+	}
+	
+
+	public static Connection sqlserverldap() {
+
+		LOGGER.info("-------- SQL server LDAP JDBC Connection Testing ------");
+		try {
+			Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
+		} catch (ClassNotFoundException e) {
+			LOGGER.error("Unable to connect to driver ", e);
+
+		}
+	
+		try {
+	
+			connection = DriverManager.getConnection("jdbc:jtds:sqlserver://" + jdbc +  ";database=" + db+";useNTLMv2=true;domain=DIR"+";user=" + username + ";password=" + passwd);
+
+		} catch (SQLException e) {
+
+			LOGGER.error("\n Conection error with " + jdbc + " database " + db, e);
+
+		}
+
+		return connection;
+
+	}
+	
+
+	public static Connection hiveconnection() {
+
+		LOGGER.info("-------- Hive JDBC Connection Testing ------");
+
+		try {
+			Class.forName("org.apache.hive.jdbc.HiveDriver");
+		} catch (ClassNotFoundException e) {
+			LOGGER.error("Unable to connect to driver ", e);
+
+		}
+
+		LOGGER.info("Hive JDBC Driver Registered!");
+
+		try {
+			connection = DriverManager.getConnection("jdbc:hive2://" + jdbc, username, passwd);
+		} catch (SQLException e) {
+
+			LOGGER.error("Conection error with " + jdbc + " database " + db, e);
+
+		}
+
+		return connection;
+
+	}
+
+	public static void database() {
+
+		String queryA = "";
+		String queryB = "";
+		String queryC = "";
+		String query = "";
+		String tablelist = "";
+
+		if (tables.contains("2")) {
+			String[] splitterString = selectedtables.split(",");
+
+			for (String s : splitterString) {
+
+				tablelist = "'" + s + "'," + tablelist;
+
+			}
+			tablelist = tablelist.substring(0, tablelist.length() - 1);
+
+		}
+
+		try {
+
+			if (source.contains(ORACLE)) {
+
+				if (def.contains("1")) {
+
+					queryA = "select" + "'" + app + "' AS ApplicationName," + "'" + SSRID + "' AS SSRID,cols.table_name,cols.column_name,'' as domain,'' as description, cols.data_type,"
+							+ "case  when cols.DATA_TYPE='NUMBER' then cols.DATA_PRECISION when cols.DATA_TYPE='DATE' or (cols.DATA_TYPE like 'TIMESTAMP%') then "
+							+ " null else cols.DATA_LENGTH end column_length,case  when cols.DATA_TYPE like 'TIMESTAMP%' then null else cols.data_scale end column_scale,'' security_classification,"
+							+ "'' unit_of_measure,'' contains_multiple_values,cols.nullable is_nullable,case when cons.column_name is null then 'N' else 'Y' end is_primary_key,cols.OWNER "
+							+ " from ALL_TAB_COLS cols,(select cons.table_name,cons_cols.column_name from USER_CONSTRAINTS cons,USER_CONS_COLUMNS cons_cols where cons.constraint_type='P' "
+							+ " and cons.constraint_name=cons_cols.constraint_name) cons where cols.table_name in (select object_name from all_objects where object_type in ('TABLE','VIEW','SYNONYM' ) and owner in (" + owner
+							+ " )) and owner in (" + owner +") and cols.table_name=cons.table_name(+) and cols.column_name=cons.column_name(+) ";
+
+					if (tables.contains("2")) {
+						queryB = " and cols.table_name in (" + tablelist + ") ";
+
+					}
+
+					queryC = " order by cols.table_name,cols.column_id ";
+
+					query = queryA + queryB + queryC;
+
+				} else {
+
+					query = cust;
+				}
+
+				stores(query.trim());
+
+			}
+			if (source.contains(SQLSERVER)) {
+
+				if (def.contains("1")) {
+
+					queryA ="select '" + app + "' AS ApplicationName," + "'" + SSRID
+							+ "' AS SSRID,Table_name,column_name,'' as domain,'' as description,data_type,column_length,column_scale,security_classification,unit_of_measure,contains_multiple_values,Is_Nullable,is_primary_key,t_SCHEMA FROM "
+							+ " (select  distinct ALL_COLUMNS.db_NAME, ALL_COLUMNS.t_SCHEMA, Replace(ALL_COLUMNS.table_name,' ','_') as Table_name ,"
+							+ " Replace(ALL_COLUMNS.column_name,' ', '_') as column_name, ALL_COLUMNS.data_type as data_type,ALL_COLUMNS.column_length as column_length, "
+							+ " ALL_COLUMNS.column_scale as  column_scale,ALL_COLUMNS.security_classification as security_classification,ALL_COLUMNS.unit_of_measure as unit_of_measure, "
+							+ " ALL_COLUMNS.contains_multiple_values as contains_multiple_values,ALL_COLUMNS.Is_Nullable as Is_Nullable, "
+							+ " case when PK_CHECK.constraint_name is null then 'N' else 'Y' end as is_primary_key ,ALL_COLUMNS.ORDINAL_POSITION AS ORDINAL_POSITION from "
+							+ " (SELECT  table_name, column_name, data_type,case when data_type in ('int','bigint','decimal','float','smallint','numeric') then numeric_precision "
+							+ "  when data_type in ('varchar','nvarchar','text','char','ntext','nchar','varbinary') and character_maximum_length < 0 then 4000 else character_maximum_length end  as column_length, "
+							+ " case when data_type in ('decimal','numeric') then numeric_scale else 0 end as column_scale, '' as security_classification,"
+							+ " '' as unit_of_measure, '' as contains_multiple_values, case when is_nullable = 'NO' then 'N' "
+							+ "  else 'Y' end as Is_Nullable,ORDINAL_POSITION,TABLE_CATALOG AS db_NAME, TAble_sCHEMA AS t_SCHEMA from INFORMATION_SCHEMA.COLUMNS where table_name in ( "
+							+ " SELECT name AS OBJECT_NAME FROM sys.objects WHERE type_desc in ('USER_TABLE','VIEW') "
+							+ " and table_name in (SELECT   distinct TABLE_NAME FROM INFORMATION_SCHEMA.TABLES where table_type in ('BASE TABLE','VIEW')  and  table_schema in (" + owner
+							+ ")))) ALL_COLUMNS" + " LEFT OUTER JOIN (SELECT * FROM INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE where constraint_name like 'PK_%') PK_CHECK"
+							+ " on ALL_COLUMNS.table_name=PK_CHECK.table_Name and ALL_COLUMNS.column_name=PK_CHECK.column_name ) FINAL_SET ";
+
+					if (tables.contains("2")) {
+						queryB = " where Table_name in (" + tablelist + ") ";
+
+					}
+
+					queryC = " ORDER BY FINAL_SET.db_NAME, FINAL_SET.t_SCHEMA,FINAL_SET.TABLE_NAME,FINAL_SET.ORDINAL_POSITION";
+
+					query = queryA + queryB + queryC;
+
+				} else {
+
+					query = cust;
+				}
+
+				stores(query.trim());
+			}
+
+			if (source.contains(MYSQL)) {
+
+				if (def.contains("1")) {
+
+					queryA = "SELECT " + "'" + app + "' AS ApplicationName, " + "'" + SSRID + "' AS SSRID, table_name as Table_Name,column_name,'' as domain,'' as description, data_type, "
+							+ " case when data_type in ('int','bigint','decimal','float','smallint','numeric') then numeric_precision "
+							+ " when data_type in ('varchar','nvarchar','text','char','ntext','nchar') then character_maximum_length end as column_length, "
+							+ " case when data_type in ('decimal','numeric') then numeric_scale else 0 end as column_scale, "
+							+ " '' as security_classification, '' as unit_of_measure, '' as contains_multiple_values, case when is_nullable = 'NO' then 'N' else 'Y' end as Is_Nullable, "
+							+ " case when column_key = 'PRI' then 'Y' else 'N' end as is_primary_key,TABLE_SCHEMA,table_catalog as db_name from INFORMATION_SCHEMA.COLUMNS where TABLE_SCHEMA in ( '" + owner + "')"
+							+ " AND table_name in " + " (SELECT distinct TABLE_NAME FROM INFORMATION_SCHEMA.TABLES where table_type in ('BASE TABLE','VIEW'))";
+
+					if (tables.contains("2")) {
+						queryB = " and table_name in (" + tablelist + ") ";
+
+					}
+
+					query = queryA + queryB;
+
+				} else {
+
+					query = cust;
+				}
+
+				stores(query.trim());
+
+			}
+
+			if (source.contains(HIVE) && (dboption.contains("1") || dboption.contains("2") || dboption.contains("3"))) {
+				
+					stores(db);
+			}
+
+			connection.close();
+
+		} catch (SQLException e) {
+			LOGGER.error("\n SQL error " + query, e);
+
+		} finally {
+
+			try {
+				if (connection != null)
+					connection.close();
+				LOGGER.info("\n  Closing connection");
+			} catch (SQLException se) {
+				LOGGER.error("\n Final connection close issue ", se);
+			}
+		}
+
+	}
+
+	public static void stores(String query) {
+		LOGGER.info("Processing your request......");
+
+		HSSFWorkbook wb = new HSSFWorkbook();
+		HSSFSheet coll = wb.createSheet("Collections");
+		HSSFSheet sheet = wb.createSheet("Attributes");
+		HSSFSheet rel = wb.createSheet("Relationships");
+		HSSFSheet dom = wb.createSheet("Domains");
+
+		HSSFRow collrowinst = coll.createRow((int) 0);
+		collrowinst.createCell((int) 0).setCellValue(Instructions);
+		collrowinst.createCell((int) 1).setCellValue("Define the Table/View/Collections and roles and their application and SSR references for the registry sheet.");
+
+		HSSFRow collrowhead = coll.createRow((int) 2);
+		collrowhead.createCell((int) 0).setCellValue("Application Name");
+		collrowhead.createCell((int) 1).setCellValue("SSR ID");
+		collrowhead.createCell((int) 2).setCellValue("Table/View/Collection");
+		collrowhead.createCell((int) 3).setCellValue("Description");
+		collrowhead.createCell((int) 4).setCellValue("Has Personal Data");
+		collrowhead.createCell((int) 5).setCellValue("Has Customer Data");
+		collrowhead.createCell((int) 6).setCellValue("Country of Residence");
+		collrowhead.createCell((int) 7).setCellValue("Role");
+		collrowhead.createCell((int) 8).setCellValue("Database Type");
+		collrowhead.createCell((int) 9).setCellValue("DataBase Name");
+		collrowhead.createCell((int) 10).setCellValue("User Schema");
+		collrowhead.createCell((int) 11).setCellValue("Delivery");
+		collrowhead.createCell((int) 12).setCellValue("Table Domain");
+
+		HSSFSheetConditionalFormatting collsheetCF = coll.getSheetConditionalFormatting();
+
+		HSSFConditionalFormattingRule collrule = collsheetCF.createConditionalFormattingRule("MOD(ROW() - 1, 1) = 0");
+
+		HSSFPatternFormatting collfill = collrule.createPatternFormatting();
+		collfill.setFillBackgroundColor(IndexedColors.GREY_40_PERCENT.getIndex());
+		collfill.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
+
+		HSSFFontFormatting collffRed = collrule.createFontFormatting();
+		collffRed.setFontColorIndex(IndexedColors.WHITE.getIndex());
+		CellRangeAddress[] collregions = { CellRangeAddress.valueOf("A3:L3") };
+		CellRangeAddress[] collregions1 = { CellRangeAddress.valueOf("A1:A1") };
+
+		collsheetCF.addConditionalFormatting(collregions, collrule);
+		collsheetCF.addConditionalFormatting(collregions1, collrule);
+		coll.setAutoFilter(new CellRangeAddress(2, coll.getLastRowNum(), 0, coll.getRow(2).getLastCellNum() - 1));
+
+		HSSFRow rowhead = sheet.createRow((int) 0);
+		rowhead.createCell((int) 0).setCellValue(Instructions);
+		rowhead.createCell((int) 1).setCellValue("Define the attributes and additional detail for the registry sheet.");
+
+		HSSFRow row = sheet.createRow((int) 2);
+
+		row.createCell((int) 0).setCellValue("Table/View/Collection");
+		row.createCell((int) 1).setCellValue("Column Name");
+		row.createCell((int) 2).setCellValue("Domain");
+		row.createCell((int) 3).setCellValue("Description");
+		row.createCell((int) 4).setCellValue("Column Type");
+		row.createCell((int) 5).setCellValue("Column Length");
+		row.createCell((int) 6).setCellValue("Column Scale");
+		row.createCell((int) 7).setCellValue("Security Classification");
+		row.createCell((int) 8).setCellValue("Unit of Measure");
+		row.createCell((int) 9).setCellValue("Contains Multiple Values");
+		row.createCell((int) 10).setCellValue("Is Nullable");
+		row.createCell((int) 11).setCellValue("Is Primary Key");
+		row.createCell((int) 12).setCellValue("Is CLI/CDC?");
+		row.createCell((int) 13).setCellValue("Column Sequence");
+		row.createCell((int) 14).setCellValue("Target Column Name");
+		row.createCell((int) 15).setCellValue("Target Column Type");
+		row.createCell((int) 16).setCellValue("Target Column Length");
+		row.createCell((int) 17).setCellValue("Target Column Scale");
+		row.createCell((int) 18).setCellValue("Owner");
+		row.createCell((int) 19).setCellValue("DataBase Name");
+		
+
+		// Format the spreadsheet
+
+		HSSFSheetConditionalFormatting sheetCF = sheet.getSheetConditionalFormatting();
+
+		HSSFConditionalFormattingRule rule = sheetCF.createConditionalFormattingRule("MOD(ROW() - 1, 1) = 0");
+
+		HSSFPatternFormatting fill = rule.createPatternFormatting();
+		fill.setFillBackgroundColor(IndexedColors.GREY_40_PERCENT.getIndex());
+		fill.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
+
+		HSSFFontFormatting ffRed = rule.createFontFormatting();
+		ffRed.setFontColorIndex(IndexedColors.WHITE.getIndex());
+		CellRangeAddress[] regions = { CellRangeAddress.valueOf("A3:S3") };
+		CellRangeAddress[] regions1 = { CellRangeAddress.valueOf("A1:A1") };
+
+		sheetCF.addConditionalFormatting(regions, rule);
+		sheetCF.addConditionalFormatting(regions1, rule);
+
+		if (source.contains("HIVE")) {
+			mapdatatocellhive(query, sheet, coll, row);
+
+		} else {
+
+			mapdatatocellnonhive(query, sheet, coll, row);
+		}
+
+		if (ind) {
+
+			sheet.setAutoFilter(new CellRangeAddress(2, sheet.getLastRowNum(), 0, sheet.getRow(2).getLastCellNum() - 1));
+
+			HSSFRow relrowinst = rel.createRow((int) 0);
+			relrowinst.createCell((int) 0).setCellValue(Instructions);
+			relrowinst.createCell((int) 1).setCellValue(
+					"Define the Foreign Key relationships (even if they aren't represented as constraints) from attributes listed on the Attributes sheet to any other attributes in this sheet or possbly another registry sheet.");
+
+			HSSFRow relrowhead = rel.createRow((int) 2);
+			relrowhead.createCell((int) 0).setCellValue("Application From");
+			relrowhead.createCell((int) 1).setCellValue("Table From");
+			relrowhead.createCell((int) 2).setCellValue("Column From");
+			relrowhead.createCell((int) 3).setCellValue("Application To");
+			relrowhead.createCell((int) 4).setCellValue("Table To");
+			relrowhead.createCell((int) 5).setCellValue("Column To");
+
+			HSSFSheetConditionalFormatting relsheetCF = rel.getSheetConditionalFormatting();
+
+			HSSFConditionalFormattingRule relrule = relsheetCF.createConditionalFormattingRule("MOD(ROW() - 1, 1) = 0");
+
+			HSSFPatternFormatting relfill = relrule.createPatternFormatting();
+			relfill.setFillBackgroundColor(IndexedColors.GREY_40_PERCENT.getIndex());
+			relfill.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
+
+			HSSFFontFormatting relffRed = relrule.createFontFormatting();
+			relffRed.setFontColorIndex(IndexedColors.WHITE.getIndex());
+			CellRangeAddress[] relregions = { CellRangeAddress.valueOf("A3:F3") };
+			CellRangeAddress[] relregions1 = { CellRangeAddress.valueOf("A1:A1") };
+
+			relsheetCF.addConditionalFormatting(relregions, relrule);
+			relsheetCF.addConditionalFormatting(relregions1, relrule);
+
+			rel.setAutoFilter(new CellRangeAddress(2, rel.getLastRowNum(), 0, rel.getRow(2).getLastCellNum() - 1));
+
+			HSSFRow domhead = dom.createRow((int) 0);
+			domhead.createCell((int) 0).setCellValue("Domains");
+			HSSFRow dom1 = dom.createRow((int) 1);
+			dom1.createCell((int) 0).setCellValue("Sales Planning");
+			HSSFRow dom2 = dom.createRow((int) 2);
+			dom1.createCell((int) 0).setCellValue("Operational Planning");
+			HSSFRow dom3 = dom.createRow((int) 3);
+			dom2.createCell((int) 0).setCellValue("Product and Service Delivery");
+			HSSFRow dom4 = dom.createRow((int) 4);
+			dom3.createCell((int) 0).setCellValue("Technology Lifecycle Management");
+			HSSFRow dom5 = dom.createRow((int) 5);
+			dom4.createCell((int) 0).setCellValue("Supply Chain");
+			HSSFRow dom6 = dom.createRow((int) 6);
+			dom5.createCell((int) 0).setCellValue("Material Master");
+			HSSFRow dom7 = dom.createRow((int) 7);
+			dom6.createCell((int) 0).setCellValue("Training & Competence");
+			HSSFRow dom8 = dom.createRow((int) 8);
+			dom7.createCell((int) 0).setCellValue("Legal & Compliance");
+			HSSFRow dom9 = dom.createRow((int) 9);
+			dom8.createCell((int) 0).setCellValue("Organization & Geography");
+			HSSFRow dom10 = dom.createRow((int) 10);
+			dom9.createCell((int) 0).setCellValue("Process & Roles");
+			HSSFRow dom11 = dom.createRow((int) 11);
+			dom10.createCell((int) 0).setCellValue("Finance");
+			HSSFRow dom12 = dom.createRow((int) 12);
+			dom11.createCell((int) 0).setCellValue("Human Resources");
+			HSSFRow dom13 = dom.createRow((int) 13);
+			dom12.createCell((int) 0).setCellValue("Quality Management & Reliability");
+			HSSFRow dom14 = dom.createRow((int) 14);
+			dom13.createCell((int) 0).setCellValue("Integrity");
+			HSSFRow dom15 = dom.createRow((int) 15);
+			dom14.createCell((int) 0).setCellValue("Research, Engineering and Manufacturing");
+			dom15.createCell((int) 0).setCellValue("Security");
+			HSSFSheetConditionalFormatting domsheetCF = dom.getSheetConditionalFormatting();
+
+			HSSFConditionalFormattingRule domrule = domsheetCF.createConditionalFormattingRule("MOD(ROW() - 1, 1) = 0");
+
+			HSSFPatternFormatting domfill = domrule.createPatternFormatting();
+			domfill.setFillBackgroundColor(IndexedColors.GREY_40_PERCENT.getIndex());
+			domfill.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
+
+			HSSFFontFormatting domffRed = domrule.createFontFormatting();
+			domffRed.setFontColorIndex(IndexedColors.WHITE.getIndex());
+
+			CellRangeAddress[] domregions = { CellRangeAddress.valueOf("A1:A1") };
+
+			domsheetCF.addConditionalFormatting(domregions, domrule);
+
+			dom.setAutoFilter(new CellRangeAddress(0, dom.getLastRowNum(), 0, dom.getRow(0).getLastCellNum() - 1));
+
+			try {
+				FileOutputStream fileOut;
+				fileOut = new FileOutputStream(folder + "/" + app + "_" + SSRID + "_Registry.xls");
+				LOGGER.info("Writing to Spreadsheet.........................");
+				wb.write(fileOut);
+				fileOut.close();
+
+				LOGGER.info("Data is saved in excel file.");
+
+			} catch (FileNotFoundException e) {
+				LOGGER.info("FATAL ERROR : File path not present or access denied,close the file and retry ");
+				LOGGER.error("Folder/File not found issue or file is open");
+
+			} catch (IOException e) {
+				LOGGER.error("Input output issue with file");
+			}
+		} else {
+			LOGGER.info("FATAL ERROR :  check the query syntex or permission");
+		}
+
+	}
+
+	private static void mapdatatocellhive(String query, HSSFSheet sheet, HSSFSheet coll, HSSFRow row) {
+		try {
+
+			int index = 3;
+			int collindex = 3;
+			String table = "";
+			String database = null;
+			String databaseandtable = null;
+			String databasename = null;
+			String tablename = null;
+			String desc = null;
+			String reg = null;
+			String column = null;
+			String length =  null;
+			String precision = null;
+			String meta = null;
+			String columnname = null;
+			String selecttable = null;
+			ResultSet rs = null;
+			int counter = 0;
+			List<String> alldbs = new ArrayList<>();
+			List<String> alldbtbls = new ArrayList<>();
+			List<String> allmetadata = new ArrayList<>();
+			Statement state = connection.createStatement();
+
+			if ((dboption.contains("1") && tables.contains("1")) || (dboption.contains("2"))) {
+				if (db.contains(",")) {
+					String[] dbsplitterString = db.split(",");
+
+					for (String s : dbsplitterString) {
+
+						database = "use " + s.trim();
+						alldbs.add(database);
+
+					}
+
+				} else {
+					database = "use " + db;
+					alldbs.add(database);
+				}
+
+				for (int k = 0; k < alldbs.size(); k++) {
+					boolean rsb = state.execute(alldbs.get(k));
+					if (!rsb) {
+
+						rs = state.executeQuery("show tables");
+
+						while (rs.next()) {
+							databaseandtable = alldbs.get(k).substring(alldbs.get(k).indexOf(' ') + 1, alldbs.get(k).length()) + "." + rs.getString(1);
+							alldbtbls.add(databaseandtable);
+							counter++;
+
+						}
+					}
+				}
+				LOGGER.info("Getting Data for " + counter + " Tables");
+			} else if ((dboption.contains("1") && tables.contains("2"))) {
+				if (selectedtables.contains(",")) {
+					String[] stsplitterString = selectedtables.split(",");
+
+					for (String s : stsplitterString) {
+
+						selecttable = db + "." + s.trim();
+						alldbtbls.add(selecttable);
+
+					}
+
+				} else {
+					database = db + "." + selectedtables;
+					alldbtbls.add(database);
+				}
+			} else if (dboption.contains("3")) {
+				if (selectedtables.contains(",")) {
+					String[] stsplitterString = selectedtables.split(",");
+
+					for (String s : stsplitterString) {
+
+						selecttable = s.trim();
+						alldbtbls.add(selecttable);
+
+					}
+
+				} else {
+					database = selectedtables;
+					alldbtbls.add(database);
+				}
+
+			}
+
+			for (int i = 0; i < alldbtbls.size(); i++) {
+				databasename = alldbtbls.get(i).substring(0, alldbtbls.get(i).indexOf('.')).trim();
+				tablename = alldbtbls.get(i).substring(alldbtbls.get(i).indexOf('.') + 1, alldbtbls.get(i).length()).trim();
+				desc = "desc " + alldbtbls.get(i);
+				LOGGER.info("Getting data for " + databasename + "." + tablename);
+				rs = state.executeQuery(desc);
+				while (rs.next()) {
+
+					if (rs.getString(2).contains("(")) {
+						column = rs.getString(2).substring(0, rs.getString(2).indexOf('('));
+						reg = rs.getString(2).substring(rs.getString(2).indexOf('(') + 1, rs.getString(2).indexOf(')'));
+
+						if (reg.contains(",")) {
+							length = reg.substring(0, reg.indexOf(','));
+							precision = reg.substring(reg.indexOf(',') + 1, reg.length());
+						} else {
+							length = reg;
+							precision = "";
+						}
+
+					} else {
+						column = rs.getString(2);
+						length = "";
+						precision = "";
+					}
+					meta = databasename + "," + tablename + "," + rs.getString(1) + "," + column + "," + length + "," + precision;
+					allmetadata.add(meta);
+				}
+			}
+
+			for (int i = 0; i < allmetadata.size(); i++) {
+				databasename = allmetadata.get(i).substring(StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 0) + 1, StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 1));
+				tablename = allmetadata.get(i).substring(StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 1) + 1, StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 2));
+				columnname = allmetadata.get(i).substring(StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 2) + 1, StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 3));
+
+				column = allmetadata.get(i).substring(StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 3) + 1, StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 4));
+				length = allmetadata.get(i).substring(StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 4) + 1, StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 5));
+				precision = allmetadata.get(i).substring(StringUtils.ordinalIndexOf(allmetadata.get(i), ",", 5) + 1, allmetadata.get(i).length());
+				row = sheet.createRow((int) index);
+				if (!table.equals(tablename)) {
+					HSSFRow collrow = coll.createRow((int) collindex);
+
+					collrow.createCell((int) 0).setCellValue(tablename);
+					collrow.createCell((int) 8).setCellValue(source);
+					collrow.createCell((int) 9).setCellValue(databasename);
+					collrow.createCell((int) 10).setCellValue(owner);
+
+					collindex++;
+
+				}
+
+				row.createCell((int) 0).setCellValue(tablename);
+				row.createCell((int) 1).setCellValue(columnname);
+				row.createCell((int) 2).setCellValue("");
+				row.createCell((int) 3).setCellValue("");
+				row.createCell((int) 4).setCellValue(column);
+				row.createCell((int) 5).setCellValue(length);
+				row.createCell((int) 6).setCellValue(precision);
+				row.createCell((int) 7).setCellValue("");
+				row.createCell((int) 8).setCellValue("");
+				row.createCell((int) 9).setCellValue("");
+				row.createCell((int) 10).setCellValue("");
+				row.createCell((int) 11).setCellValue("");
+				row.createCell((int) 12).setCellValue("N");
+				row.createCell((int) 19).setCellValue(databasename);
+
+				table = tablename;
+				index++;
+			}
+			rs.close();
+			
+			LOGGER.info("Creating Spreadsheet......");
+			LOGGER.info("Records fetched from Source");
+			ind = true;
+
+		} catch (
+
+		SQLException e) {
+			LOGGER.error(" Query syntex error " + e + query);
+		}
+
+
+	}
+
+	private static void mapdatatocellnonhive(String query, HSSFSheet sheet, HSSFSheet coll, HSSFRow row) {
+		try {
+			int index = 3;
+			int collindex = 3;
+			String table = "";
+			PreparedStatement pr = connection.prepareStatement(query);
+			ResultSet rs = pr.executeQuery();
+
+			while (rs.next()) {
+
+			row = sheet.createRow((int) index);
+				if (!table.equals(rs.getString(3))) {
+					HSSFRow collrow = coll.createRow((int) collindex);
+					app = rs.getString(1);
+					SSRID = rs.getString(2);
+					collrow.createCell((int) 0).setCellValue(rs.getString(1));
+					collrow.createCell((int) 1).setCellValue(rs.getString(2));
+					collrow.createCell((int) 2).setCellValue(rs.getString(3));
+					collrow.createCell((int) 8).setCellValue(source);
+					collrow.createCell((int) 9).setCellValue(db);
+					collrow.createCell((int) 10).setCellValue(rs.getString(15));
+
+					collindex++;
+
+				}
+
+				row.createCell((int) 0).setCellValue(rs.getString(3));
+				row.createCell((int) 1).setCellValue(rs.getString(4));
+				row.createCell((int) 2).setCellValue(rs.getString(5));
+				row.createCell((int) 4).setCellValue(rs.getString(7));
+				row.createCell((int) 3).setCellValue(rs.getString(6));
+				row.createCell((int) 5).setCellValue(rs.getString(8));
+				row.createCell((int) 6).setCellValue(rs.getString(9));
+				row.createCell((int) 7).setCellValue(rs.getString(10));
+				row.createCell((int) 8).setCellValue(rs.getString(11));
+				row.createCell((int) 9).setCellValue(rs.getString(12));
+				row.createCell((int) 10).setCellValue(rs.getString(13));
+				row.createCell((int) 11).setCellValue(rs.getString(14));
+				row.createCell((int) 12).setCellValue("N");
+				
+				row.createCell((int) 19).setCellValue(db);
+				row.createCell((int) 18).setCellValue(rs.getString(15));
+
+				table = rs.getString(3);
+				index++;
+			}
+			rs.close();
+			pr.close();
+			LOGGER.info("Creating Spreadsheet......");
+			LOGGER.info("Records fetched from Source");
+			ind = true;
+		} catch (SQLException e) {
+
+			LOGGER.error(" Query syntax error " + query);
+
+		}
+
+
+
+	}
+
+}
